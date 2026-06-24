@@ -38,6 +38,9 @@ pico_sdk_init()
 add_executable(rp-tuner
     main.c 
     botoes.c
+    display.c
+    matriz_led.c
+    microfone.c
 )
 
 pico_set_program_name(rp-tuner "rp-tuner")
@@ -65,6 +68,7 @@ target_link_libraries(rp-tuner
         hardware_pio
         hardware_timer
         hardware_adc
+        hardware_timer
         )
 
 pico_add_extra_outputs(rp-tuner)
