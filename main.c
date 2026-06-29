@@ -57,8 +57,8 @@ int main() {
 
             if (freq_calculada > 0.0f) {
                 atualizar_ecra_afinacao(freq_calculada);
-               atualizar_agulha_led(freq_calculada, alvo);
-               pwm_atualizar_brilho(freq_calculada, alvo); // Ajusta o brilho do LED
+                atualizar_agulha_led(freq_calculada, alvo);
+                pwm_atualizar_brilho(freq_calculada, alvo); // Ajusta o brilho do LED
             } else {
                 pwm_atualizar_brilho(0.0f, alvo); // Desliga o LED se houver silêncio
             }
