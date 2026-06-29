@@ -68,7 +68,8 @@ target_link_libraries(rp-tuner
         hardware_pio
         hardware_timer
         hardware_adc
-        hardware_timer
+        hardware_dma
+        hardware_pwm
         )
 
 pico_add_extra_outputs(rp-tuner)

@@ -1,63 +1,69 @@
 #include <stdio.h>
-#include <math.h> // Essencial para gerarmos a onda do "violão virtual"
 #include "pico/stdlib.h"
-#include "hardware/adc.h"
-#include "hardware/timer.h"
 #include "hardware/i2c.h"
+#include "hardware/timer.h"
 
 #include "botoes.h" 
 #include "display.h"
 #include "matriz_led.h"
 #include "microfone.h"
+#include "led_pwm.h"
 
 #define I2C_PORT i2c1
 #define I2C_SDA 14
 #define I2C_SCL 15
 
-#define PI 3.14159265358979323846
+// Variável global de controlo para o temporizador
+volatile bool realizar_leitura = false;
+
+// Função de Callback do Temporizador (disparada automaticamente pelo hardware)
+bool timer_callback(struct repeating_timer *t) {
+    realizar_leitura = true; // Avisa o loop principal que é hora de ler o áudio
+    return true; // Retorna true para que o temporizador continue a repetir-se
+}
 
 int main() {
     stdio_init_all();
     
-    // O nosso balde de áudio
-    uint16_t buffer_mic[TAMANHO_BUFFER];
+    uint16_t buffer_audio[TAMANHO_BUFFER];
 
-    // Inicializações dos nossos módulos (cada um cuida da sua própria configuração de hardware)
     inicializar_botoes();
     matriz_init();
-    microfone_init(); // Isso já resolve o adc_init e os pinos do microfone internamente!
+    microfone_init(); 
+    pwm_init_led();
 
-    // Inicialização do I2C para o Display
     i2c_init(I2C_PORT, 400 * 1000);
     gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
     gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);
     gpio_pull_up(I2C_SDA);
     gpio_pull_up(I2C_SCL);
 
-    // Inicializa o Ecrã OLED
     oled_init();
     atualizar_ecra_afinacao(0.0);
 
-// ... inicializações anteriores mantidas ...
+    struct repeating_timer timer;
+    add_repeating_timer_ms(150, timer_callback, NULL, &timer);
 
-    // O ÚNICO LOOP INFINITO (Versão Placa Física)
     while (true) {
-        // 1. Ouve o mundo real: Captura o som do microfone da BitDogLab
-        gravar_audio(buffer_mic);
+        // O processador fica livre aqui até que o temporizador mude a flag
+        if (realizar_leitura) {
+            realizar_leitura = false; // Reinicia a flag para a próxima leitura
+            
+            // Captura o áudio real via microfone e DMA
+            capturar_audio(buffer_audio);
 
-        // 2. A HORA DA VERDADE: O algoritmo descobre a frequência da nota tocada
-        float freq_calculada = calcular_frequencia(buffer_mic);
+            float freq_calculada = calcular_frequencia(buffer_audio);
+            float alvo = violao[corda_atual].freq_alvo;
 
-        // 3. Pegamos a frequência alvo da corda que está selecionada pelos botões
-        float alvo = violao[corda_atual].freq_alvo;
-
-        // 4. Atualizamos os visores apenas se o microfone captar algum som audível
-        if (freq_calculada > 0.0f) {
-            atualizar_ecra_afinacao(freq_calculada);
-            atualizar_agulha_led(freq_calculada, alvo);
+            if (freq_calculada > 0.0f) {
+                atualizar_ecra_afinacao(freq_calculada);
+               atualizar_agulha_led(freq_calculada, alvo);
+               pwm_atualizar_brilho(freq_calculada, alvo); // Ajusta o brilho do LED
+            } else {
+                pwm_atualizar_brilho(0.0f, alvo); // Desliga o LED se houver silêncio
+            }
         }
-
-        // Uma pausa leve para o processador respirar
-        sleep_ms(10);
     }
+
+    return 0;
 }

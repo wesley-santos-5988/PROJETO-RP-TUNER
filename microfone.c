@@ -1,61 +1,104 @@
 #include "microfone.h"
 #include "hardware/adc.h"
-#include "hardware/timer.h"
-#include "pico/stdlib.h"
-#include <math.h>
+#include "hardware/dma.h"
 
-// Prepara o pino para receber os sinais elétricos da placa BitDogLab
+uint dma_canal;
+
 void microfone_init(void) {
     adc_init();
     adc_gpio_init(MIC_PIN);
-    adc_select_input(MIC_ADC_CANAL);
-}
-
-// Grava o som em um array (buffer) passado por referência
-void gravar_audio(uint16_t *buffer) {
-    uint32_t intervalo_us = 1000000 / TAXA_AMOSTRAGEM; 
-
-    for (int i = 0; i < TAMANHO_BUFFER; i++) {
-        uint64_t inicio = time_us_64(); 
-        buffer[i] = adc_read();
-        while ((time_us_64() - inicio) < intervalo_us) {
-            tight_loop_contents();
-        }
-    }
-}
-
-// COLOQUE A FUNÇÃO AQUI: A inteligência matemática do afinador
-float calcular_frequencia(uint16_t *buffer) {
-    long soma = 0;
+    adc_select_input(MIC_CANAL);
     
-    for (int i = 0; i < TAMANHO_BUFFER; i++) {
-        soma += buffer[i];
-    }
-    float media = (float)soma / TAMANHO_BUFFER;
+    // Configura o ADC para capturar continuamente (Free-running)
+    adc_fifo_setup(
+        true,    // Habilita FIFO
+        true,    // Habilita request de DMA
+        1,       // Threshold do DREQ
+        false,   // Sem bit de erro
+        false    // Shift para 8 bits falso (mantém 12 bits)
+    );
+    
+    // Configura o clock do ADC para a taxa de amostragem desejada
+    adc_set_clkdiv(48000000.0f / TAXA_AMOSTRAGEM);
 
-    float sinal[TAMANHO_BUFFER];
-    for (int i = 0; i < TAMANHO_BUFFER; i++) {
-        sinal[i] = (float)buffer[i] - media;
-    }
+    // Configuração do DMA para transferir do ADC para a memória
+    dma_canal = dma_claim_unused_channel(true);
+    dma_channel_config config = dma_channel_get_default_config(dma_canal);
+    
+    channel_config_set_transfer_data_size(&config, DMA_SIZE_16);
+    channel_config_set_read_increment(&config, false); // Lê sempre do mesmo registrador (FIFO)
+    channel_config_set_write_increment(&config, true); // Incrementa o endereço no buffer
+    channel_config_set_dreq(&config, DREQ_ADC);        // Sincroniza com o ADC
 
+    dma_channel_configure(
+        dma_canal,
+        &config,
+        NULL,           // Endereço de escrita (definido na captura)
+        &adc_hw->fifo,  // Endereço de leitura (FIFO do ADC)
+        TAMANHO_BUFFER,
+        false           // Não inicia imediatamente
+    );
+}
+
+void capturar_audio(uint16_t *buffer) {
+    adc_fifo_drain(); // Limpa leituras antigas
+    adc_run(false);
+    
+    dma_channel_set_write_addr(dma_canal, buffer, true); // Inicia o DMA
+    adc_run(true); // Inicia o ADC
+    
+    dma_channel_wait_for_finish_blocking(dma_canal); // Aguarda o buffer encher
+    
+    adc_run(false); // Para o ADC
+}
+
+float calcular_frequencia(uint16_t *buffer) {
     float max_correlacao = 0;
     int melhor_lag = 0;
-    
-    for (int lag = 20; lag < TAMANHO_BUFFER / 2; lag++) {
+    int lag_min = 25;
+    int lag_max = 500;
+
+    // Cálculo da autocorrelação
+    for (int lag = lag_min; lag <= lag_max; lag++) {
         float correlacao = 0;
         for (int i = 0; i < TAMANHO_BUFFER - lag; i++) {
-            correlacao += sinal[i] * sinal[i + lag];
+            // Remove o offset DC assumindo centro em 2048 (meia escala de 12 bits)
+            int amostra1 = buffer[i] - 2048;
+            int amostra2 = buffer[i + lag] - 2048;
+            correlacao += amostra1 * amostra2;
         }
-
         if (correlacao > max_correlacao) {
             max_correlacao = correlacao;
             melhor_lag = lag;
         }
     }
 
-    if (melhor_lag > 0 && max_correlacao > 500000.0f) { 
-        return (float)TAXA_AMOSTRAGEM / (float)melhor_lag;
+    if (melhor_lag == 0) return 0.0f;
+
+    // Interpolação parabólica para refinar o pico
+    float lag_interpolado = (float)melhor_lag;
+    if (melhor_lag > lag_min && melhor_lag < lag_max) {
+        float y1 = 0, y2 = 0, y3 = 0;
+        
+        for (int i = 0; i < TAMANHO_BUFFER - (melhor_lag - 1); i++) {
+            y1 += (buffer[i] - 2048) * (buffer[i + melhor_lag - 1] - 2048);
+        }
+        for (int i = 0; i < TAMANHO_BUFFER - melhor_lag; i++) {
+            y2 += (buffer[i] - 2048) * (buffer[i + melhor_lag] - 2048);
+        }
+        for (int i = 0; i < TAMANHO_BUFFER - (melhor_lag + 1); i++) {
+            y3 += (buffer[i] - 2048) * (buffer[i + melhor_lag + 1] - 2048);
+        }
+
+        float alfa = y1;
+        float beta = y2;
+        float gama = y3;
+        float denominador = 2.0f * (alfa - 2.0f * beta + gama);
+
+        if (denominador != 0.0f) {
+            lag_interpolado += (alfa - gama) / denominador;
+        }
     }
 
-    return 0.0f;
+    return TAXA_AMOSTRAGEM / lag_interpolado;
 }
