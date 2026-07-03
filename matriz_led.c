@@ -4,7 +4,6 @@
 #include "hardware/clocks.h"
 
 // Código de máquina compilado para controlar os LEDs WS2812 (Neopixels)
-// Isso evita que você precise criar arquivos .pio externos!
 static const uint16_t ws2812_program_instructions[] = {
     0x6221, 0x1123, 0x1400, 0xa442
 };
@@ -57,13 +56,26 @@ void matriz_update(void) {
     }
 }
 
-// Função auxiliar para pintar um LED usando coordenadas X e Y
+// FUNÇÃO CORRIGIDA: Trata o efeito zigue-zague (serpentine) da BitDogLab
 void set_led(int x, int y, uint8_t r, uint8_t g, uint8_t b) {
     if (x < 0 || x > 4 || y < 0 || y > 4) return;
-    int index = y * 5 + x; // Transforma 2D em 1D
+    
+    int index;
+    
+    // O truque está aqui: verifica se a linha (y) é par ou ímpar
+    if (y % 2 == 0) {
+        // Linhas pares (0, 2, 4): Direção normal (Esquerda -> Direita)
+        index = y * 5 + x;
+    } else {
+        // Linhas ímpares (1, 3): Direção invertida (Direita -> Esquerda)
+        // Inverte o eixo X fazendo (4 - x)
+        index = y * 5 + (4 - x);
+    }
+    
     leds[index] = urgb_u32(r, g, b);
 }
 
+// A lógica visual do nosso afinador
 // A lógica visual do nosso afinador
 void atualizar_agulha_led(float freq_lida, float freq_alvo) {
     matriz_clear();
@@ -77,16 +89,18 @@ void atualizar_agulha_led(float freq_lida, float freq_alvo) {
     float erro = freq_lida - freq_alvo;
     int coluna = 2; // Padrão: Centro (Afinado)
 
-    // Define qual coluna acender baseado na distância do alvo
-    if (erro < -5.0) coluna = 0;       // Muito grave
-    else if (erro < -1.0) coluna = 1;  // Quase (grave)
-    else if (erro > 5.0) coluna = 4;   // Muito agudo
-    else if (erro > 1.0) coluna = 3;   // Quase (agudo)
+    // LÓGICA DE MARGEM DE ERRO
+    // Troque o 1.5 e o 5.0 para deixar o afinador mais rigoroso ou mais tolerante!
+    if (erro < -5.0) coluna = 4;       // Muito grave
+    else if (erro < -1.5) coluna = 3;  // Quase grave (Amarelo)
+    else if (erro > 5.0) coluna = 0;   // Muito agudo
+    else if (erro > 1.5) coluna = 1;   // Quase agudo (Amarelo)
+    // Se o erro for entre -1.5 e 1.5, ele ignora os IFs e mantém a coluna = 2 (Verde!)
 
     // Acende a coluna inteira
     for (int y = 0; y < 5; y++) {
         if (coluna == 2) set_led(coluna, y, 0, 50, 0); // Verde (Afinado)
-        else if (coluna == 1 || coluna == 3) set_led(coluna, y, 50, 50, 0); // Amarelo
+        else if (coluna == 3 || coluna == 1) set_led(coluna, y, 50, 50, 0); // Amarelo
         else set_led(coluna, y, 50, 0, 0); // Vermelho
     }
     

@@ -1,44 +1,36 @@
-#include "led_pwm.h"
 #include "pico/stdlib.h"
 #include "hardware/pwm.h"
-#include <math.h>
+#include "hardware/gpio.h"
 
-#define LED_VERDE_PIN 11 // Pino do LED verde na BitDogLab
+// Na BitDogLab, os LEDs RGB comuns ficam nos pinos 11 (Azul), 12 (Verde) e 13 (Vermelho).
+// Escolha um deles para responder ao PWM (ex: Pino 12 - Verde)
+#define LED_PWM_PIN 12 
 
-uint slice_num;
-
+// Inicializa o pino escolhido para funcionar como PWM
 void pwm_init_led(void) {
-    // Configura o pino para a função PWM
-    gpio_set_function(LED_VERDE_PIN, GPIO_FUNC_PWM);
+    // Configura o pino para a função de PWM
+    gpio_set_function(LED_PWM_PIN, GPIO_FUNC_PWM);
     
-    // Descobre qual o "slice" (canal interno) do PWM que controla este pino
-    slice_num = pwm_gpio_to_slice_num(LED_VERDE_PIN);
-
-    // Configura o PWM para um ciclo de resolução de 16 bits (0 a 65535)
-    pwm_set_wrap(slice_num, 65535);
+    // Descobre qual slice de hardware do RP2040 controla esse pino
+    uint slice_num = pwm_gpio_to_slice_num(LED_PWM_PIN);
     
-    // Inicia com o LED apagado (nível 0)
-    pwm_set_chan_level(slice_num, pwm_gpio_to_channel(LED_VERDE_PIN), 0);
+    // Configuração do período (Wrap): 255 define uma resolução de 8 bits (0 a 255)
+    pwm_config config = pwm_get_default_config();
+    pwm_config_set_wrap(&config, 255);
     
-    // Habilita o hardware de PWM
-    pwm_set_enabled(slice_num, true);
+    // Inicializa o hardware com a configuração e ativa o PWM
+    pwm_init(slice_num, &config, true);
 }
 
-void pwm_atualizar_brilho(float freq_lida, float freq_alvo) {
-    // Calcula a diferença entre a afinação real e o alvo
-    float diferenca = fabs(freq_lida - freq_alvo);
+// Atualiza o brilho do LED alterando o ciclo de trabalho (Duty Cycle)
+void pwm_atualizar_brilho(int brilho) {
+    // Garante que o brilho fique dentro do limite de 0 a 255
+    if (brilho < 0) brilho = 0;
+    if (brilho > 255) brilho = 255;
+
+    uint slice_num = pwm_gpio_to_slice_num(LED_PWM_PIN);
+    uint channel = pwm_gpio_to_channel(LED_PWM_PIN);
     
-    uint16_t brilho = 0;
-
-    // Se estiver a menos de 5 Hz de diferença, começa a acender
-    if (diferenca <= 5.0f) {
-        // Quanto menor a diferença, maior o brilho. Cravar = 65535 (100%)
-        float intensidade = (5.0f - diferenca) / 5.0f; 
-        brilho = (uint16_t)(intensidade * 65535);
-    } else {
-        brilho = 0; // Desafinado (muito longe do alvo): LED apagado
-    }
-
-    // Aplica o brilho no hardware
-    pwm_set_chan_level(slice_num, pwm_gpio_to_channel(LED_VERDE_PIN), brilho);
+    // Define o nível do canal para alterar a intensidade luminosa
+    pwm_set_chan_level(slice_num, channel, brilho);
 }

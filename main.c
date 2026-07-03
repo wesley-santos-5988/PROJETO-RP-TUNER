@@ -2,7 +2,6 @@
 #include "pico/stdlib.h"
 #include "hardware/i2c.h"
 #include "hardware/timer.h"
-
 #include "botoes.h" 
 #include "display.h"
 #include "matriz_led.h"
@@ -52,15 +51,26 @@ int main() {
             // Captura o áudio real via microfone e DMA
             capturar_audio(buffer_audio);
 
+            // Analisa a frequência matemática
             float freq_calculada = calcular_frequencia(buffer_audio);
             float alvo = violao[corda_atual].freq_alvo;
 
+            // Atualiza todos os periféricos de saída
             if (freq_calculada > 0.0f) {
                 atualizar_ecra_afinacao(freq_calculada);
                 atualizar_agulha_led(freq_calculada, alvo);
-                pwm_atualizar_brilho(freq_calculada, alvo); // Ajusta o brilho do LED
+                
+                // --- NOVA LÓGICA DO LED PWM ---
+                float erro = freq_calculada - alvo;
+                // Se estiver dentro da margem do Verde (ex: -1.5 a 1.5 Hz)
+                if (erro >= -1.5f && erro <= 1.5f) {
+                    pwm_atualizar_brilho(255); // Liga o LED no brilho máximo
+                } else {
+                    pwm_atualizar_brilho(0);   // Desliga o LED (longe da nota)
+                }
+                
             } else {
-                pwm_atualizar_brilho(0.0f, alvo); // Desliga o LED se houver silêncio
+                pwm_atualizar_brilho(0); // Desliga o LED se houver silêncio
             }
         }
     }
