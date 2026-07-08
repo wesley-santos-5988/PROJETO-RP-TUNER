@@ -26,30 +26,27 @@ void microfone_init(void) {
     dma_channel_config config = dma_channel_get_default_config(dma_canal);
     
     channel_config_set_transfer_data_size(&config, DMA_SIZE_16);
-    channel_config_set_read_increment(&config, false); // Lê sempre do mesmo registrador (FIFO)
-    channel_config_set_write_increment(&config, true); // Incrementa o endereço no buffer
-    channel_config_set_dreq(&config, DREQ_ADC);        // Sincroniza com o ADC
+    channel_config_set_read_increment(&config, false);
+    channel_config_set_write_increment(&config, true);
+    channel_config_set_dreq(&config, DREQ_ADC);  
 
     dma_channel_configure(
         dma_canal,
         &config,
-        NULL,           // Endereço de escrita (definido na captura)
-        &adc_hw->fifo,  // Endereço de leitura (FIFO do ADC)
+        NULL,
+        &adc_hw->fifo, 
         TAMANHO_BUFFER,
-        false           // Não inicia imediatamente
+        false 
     );
 }
 
 void capturar_audio(uint16_t *buffer) {
-    adc_fifo_drain(); // Limpa leituras antigas
+    adc_fifo_drain();
     adc_run(false);
-    
-    dma_channel_set_write_addr(dma_canal, buffer, true); // Inicia o DMA
-    adc_run(true); // Inicia o ADC
-    
-    dma_channel_wait_for_finish_blocking(dma_canal); // Aguarda o buffer encher
-    
-    adc_run(false); // Para o ADC
+    dma_channel_set_write_addr(dma_canal, buffer, true);
+    adc_run(true);
+    dma_channel_wait_for_finish_blocking(dma_canal);
+    adc_run(false);
 }
 
 float calcular_frequencia(uint16_t *buffer) {
@@ -62,7 +59,6 @@ float calcular_frequencia(uint16_t *buffer) {
     for (int lag = lag_min; lag <= lag_max; lag++) {
         float correlacao = 0;
         for (int i = 0; i < TAMANHO_BUFFER - lag; i++) {
-            // Remove o offset DC assumindo centro em 2048 (meia escala de 12 bits)
             int amostra1 = buffer[i] - 2048;
             int amostra2 = buffer[i + lag] - 2048;
             correlacao += amostra1 * amostra2;
